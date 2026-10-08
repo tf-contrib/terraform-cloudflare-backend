@@ -1,30 +1,31 @@
-# terraform-cloudflare-sts
+# terraform-cloudflare-backend
 
-[![CI](https://github.com/tf-contrib/terraform-cloudflare-sts/actions/workflows/ci.yml/badge.svg)](https://github.com/tf-contrib/terraform-cloudflare-sts/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/tf-contrib/terraform-cloudflare-sts?include_prereleases)](https://github.com/tf-contrib/terraform-cloudflare-sts/releases)
+[![CI](https://github.com/tf-contrib/terraform-cloudflare-backend/actions/workflows/ci.yml/badge.svg)](https://github.com/tf-contrib/terraform-cloudflare-backend/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/tf-contrib/terraform-cloudflare-backend?include_prereleases)](https://github.com/tf-contrib/terraform-cloudflare-backend/releases)
 [![License](https://img.shields.io/badge/License-MPL--2.0-brightgreen.svg)](LICENSE)
 [![OpenTofu](https://img.shields.io/badge/OpenTofu-compatible-FFDA18?logo=opentofu&logoColor=black)](https://opentofu.org)
 
 [Cloudflare R2](https://developers.cloudflare.com/r2/) as an
-[OpenTofu](https://opentofu.org) and Terraform state backend, with short-lived
-credentials from [cloudflare-sts](https://github.com/cf-contrib/cloudflare-sts)
-and no secret on disk or in CI.
+[OpenTofu](https://opentofu.org) and Terraform state backend, with its
+credentials from the environment and no secret on disk.
 
 R2 speaks the S3 API, so the `s3` backend works with it. That backend reads
-its credentials from an AWS shared config profile. `terraform-cloudflare-sts`
-is that profile's `credential_process`:
+its credentials from an AWS shared config profile. `terraform-cloudflare-backend`
+is that profile's `credential_process`: it prints `CLOUDFLARE_R2_ACCESS_KEY_ID`,
+`CLOUDFLARE_R2_SECRET_ACCESS_KEY` and, for temporary ones,
+`CLOUDFLARE_R2_SESSION_TOKEN`, in the format the backend reads. Whatever sets
+them:
 
-- **In CI,** the [cloudflare-sts action](https://github.com/cf-contrib/cloudflare-sts)
-  has already set `CLOUDFLARE_R2_*`. It prints those.
-- **Under `cloudflare-sts exec -- tofu ...`,** the CLI has set them too. It
-  prints those.
-- **Otherwise,** it runs `cloudflare-sts exec` to get them, with your stored
-  login, and prints what it gets. So `tofu init` or `tofu state list` works
-  without wrapping.
+- **In CI,** the [cloudflare-sts action](https://github.com/cf-contrib/cloudflare-sts),
+  with short-lived credentials for the job.
+- **Locally,** `cloudflare-sts exec -- tofu ...`, with short-lived credentials
+  from your login.
+- **Or** an R2 API token's keys, exported, when there's no broker to ask.
 
-`AWS_*` is neither read nor set. The Cloudflare provider needs nothing from
-it: it reads `CLOUDFLARE_API_TOKEN`, which the action and `cloudflare-sts exec`
-set.
+Without them it fails at once, saying so: it never fetches credentials itself.
+`AWS_*` is neither read nor set. The Cloudflare provider needs nothing from it:
+it reads `CLOUDFLARE_API_TOKEN`, which the action and `cloudflare-sts exec` set
+too, so the same command gets both.
 
 ## Usage
 
@@ -32,25 +33,25 @@ Add the package to the repo's dev shell:
 
 ```nix
 {
-  inputs.terraform-cloudflare-sts.url = "github:tf-contrib/terraform-cloudflare-sts/v0.1.0"; # x-release-please-version
+  inputs.terraform-cloudflare-backend.url = "github:tf-contrib/terraform-cloudflare-backend/v0.1.0"; # x-release-please-version
 
   # ...
   devShells.default = pkgs.mkShell {
     packages = [
       pkgs.opentofu
-      terraform-cloudflare-sts.packages.${system}.default
+      terraform-cloudflare-backend.packages.${system}.default
     ];
   };
 }
 ```
 
-Or install it for yourself: `nix profile install github:tf-contrib/terraform-cloudflare-sts`.
+Or install it for yourself: `nix profile install github:tf-contrib/terraform-cloudflare-backend`.
 
 Then write `backend.ini` beside the root module:
 
 ```ini
 [profile tofu]
-credential_process = terraform-cloudflare-sts --profile example-org/app:tofu
+credential_process = terraform-cloudflare-backend
 ```
 
 And point the backend at it:
@@ -72,16 +73,11 @@ terraform {
 }
 ```
 
-The options after `terraform-cloudflare-sts` are `cloudflare-sts exec`'s:
-`--profile`, `--url` and `--ttl`. They apply only when it runs
-`cloudflare-sts exec` itself. With `CLOUDFLARE_R2_*` already set, they're
-ignored: the action's `profile` decides. `CLOUDFLARE_STS_CLI_URL` and
-`CLOUDFLARE_STS_CLI_PROFILE` work too, e.g. set in the dev shell.
+### With cloudflare-sts
 
-### The broker's profile
-
-The `--profile` is a cloudflare-sts profile with a `bucket`, limited to the
-prefix the backend's `key` is under:
+A [cloudflare-sts](https://github.com/cf-contrib/cloudflare-sts) profile with a
+`bucket`, limited to the prefix the backend's `key` is under, gives the job or
+the person the R2 credentials:
 
 ```yaml
   - name: example-org/app:tofu
@@ -99,7 +95,7 @@ prefix the backend's `key` is under:
 See [Buckets](https://github.com/cf-contrib/cloudflare-sts/tree/main/crates/cloudflare-sts-api#buckets)
 for the rules on prefixes, and why IDs make better ones than names.
 
-### In CI
+In CI:
 
 ```yaml
 permissions:
@@ -108,7 +104,7 @@ permissions:
 steps:
   - uses: actions/checkout@v7
   - uses: DeterminateSystems/nix-installer-action@v23
-  - uses: cf-contrib/cloudflare-sts@v0.20.0
+  - uses: cf-contrib/cloudflare-sts@v0.21.0
     with:
       url: https://cloudflare-sts-api.example.com
       profile: example-org/app:tofu
@@ -116,33 +112,34 @@ steps:
   - run: nix develop --command tofu plan -input=false
 ```
 
-### Locally
+Locally, every `tofu` command that reads or writes state runs under
+`cloudflare-sts exec`, which gives the backend and the provider their
+credentials alike, and revokes the token when `tofu` exits:
 
 ```sh
 cloudflare-sts login --url https://cloudflare-sts-api.example.com   # once
-cloudflare-sts exec --profile example-org/app:tofu -- tofu plan      # backend and provider
-tofu state list                                                      # backend only
+cloudflare-sts exec --profile example-org/app:tofu -- tofu init
+cloudflare-sts exec --profile example-org/app:tofu -- tofu plan
 ```
+
+`CLOUDFLARE_STS_CLI_URL` and `CLOUDFLARE_STS_CLI_PROFILE`, e.g. set in the dev
+shell, save the options.
 
 ## Limits
 
-- **No expiry.** `cloudflare-sts exec` doesn't pass the credentials' expiry
-  on, so OpenTofu uses them for the whole run. An apply that outlasts the
-  profile's `ttl` fails to write its state at the end. OpenTofu then saves it
-  to `errored.tfstate`. Give the profile a `ttl` longer than your longest
-  apply.
-- **No sign-in prompt.** OpenTofu runs `credential_process` without a
-  terminal, so a missing or expired login fails. Run `cloudflare-sts login`,
-  then try again.
-- **One mint per run.** Each `tofu` command that runs it gets new R2
-  credentials. If the profile also has a `token`, the token is minted and
-  revoked with them. The R2 credentials can't be revoked, and expire.
+- **No expiry.** `cloudflare-sts exec` doesn't pass the credentials' expiry on,
+  so OpenTofu uses them for the whole run. An apply that outlasts the profile's
+  `ttl` fails to write its state at the end. OpenTofu then saves it to
+  `errored.tfstate`. Give the profile a `ttl` longer than your longest apply.
+- **No options.** Which credentials, and for how long, is up to what sets
+  them. An option, such as an older `backend.ini`'s `--profile`, is refused
+  rather than ignored.
 
 ## Development
 
 ```sh
 nix develop
-bash tests/run.sh          # the script in this repo, against a fake cloudflare-sts
+bash tests/run.sh          # the script in this repo
 nix flake check            # shellcheck, and the tests against the package
 ```
 

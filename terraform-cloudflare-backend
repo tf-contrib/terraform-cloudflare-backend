@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# R2 credentials for Terraform's S3 backend, printed as JSON for an AWS shared
+# config profile's credential_process. See README.md.
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage: terraform-cloudflare-backend
+
+Print R2 credentials for Terraform's S3 backend, in the AWS SDK's process
+credentials format, from CLOUDFLARE_R2_ACCESS_KEY_ID,
+CLOUDFLARE_R2_SECRET_ACCESS_KEY and CLOUDFLARE_R2_SESSION_TOKEN: as the
+cloudflare-sts action and `cloudflare-sts exec` set them, or an R2 API token's
+keys. Meant for credential_process in backend.ini:
+
+  [profile tofu]
+  credential_process = terraform-cloudflare-backend
+USAGE
+}
+
+case "${1:-}" in
+  -h | --help)
+    usage
+    exit 0
+    ;;
+  "") ;;
+  *)
+    # Such as an older backend.ini's --profile: it would choose nothing now.
+    echo "terraform-cloudflare-backend: takes no options, got $1; see --help" >&2
+    exit 2
+    ;;
+esac
+
+if [[ -z "${CLOUDFLARE_R2_ACCESS_KEY_ID:-}" ]]; then
+  echo "terraform-cloudflare-backend: CLOUDFLARE_R2_ACCESS_KEY_ID is not set: run tofu under 'cloudflare-sts exec --', or export an R2 API token's keys" >&2
+  exit 1
+fi
+
+# Beside this script, in the repo and in the Nix package alike.
+exec jq -n -f "$(dirname -- "${BASH_SOURCE[0]}")/backend.jq"

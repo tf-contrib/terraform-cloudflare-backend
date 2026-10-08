@@ -1,5 +1,5 @@
 {
-  description = "terraform-cloudflare-sts - R2 as a Terraform state backend, with credentials from cloudflare-sts.";
+  description = "terraform-cloudflare-backend - R2 as a Terraform state backend, with credentials from the environment.";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -19,12 +19,12 @@
         pkgs = nixpkgs.legacyPackages.${system};
         inherit (pkgs) lib;
         version = (lib.importJSON ./.github/config/release-please-manifest.json).".";
-        name = "terraform-cloudflare-sts";
+        name = "terraform-cloudflare-backend";
       in
       {
-        # jq is its only dependency. cloudflare-sts isn't one: CI has the
-        # action's credentials and never runs it, and people install it
-        # themselves, like gh.
+        # jq is its only dependency: the credentials come from the
+        # environment, which the cloudflare-sts action, `cloudflare-sts exec`,
+        # or an exported R2 API token sets.
         packages.default = pkgs.stdenvNoCC.mkDerivation {
           pname = name;
           inherit version;
@@ -49,8 +49,8 @@
             runHook postInstall
           '';
           meta = {
-            description = "R2 credentials for Terraform's S3 backend, from cloudflare-sts";
-            homepage = "https://github.com/tf-contrib/terraform-cloudflare-sts";
+            description = "R2 credentials for Terraform's S3 backend, from the environment";
+            homepage = "https://github.com/tf-contrib/terraform-cloudflare-backend";
             license = lib.licenses.mpl20;
             mainProgram = name;
             platforms = lib.platforms.unix;

@@ -3,7 +3,7 @@
   "packages": {
     ".": {
       "release-type": "simple",
-      "package-name": "terraform-cloudflare-sts",
+      "package-name": "terraform-cloudflare-backend",
       "include-v-in-tag": true,
       "include-v-in-release-name": true,
       "include-component-in-tag": false,

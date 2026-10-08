@@ -1,45 +1,28 @@
 #!/usr/bin/env bash
-# Tests terraform-cloudflare-sts against a fake cloudflare-sts. Pass the program
-# to test, e.g. the Nix package's bin/terraform-cloudflare-sts; the default is
-# the script in this repo.
+# Tests terraform-cloudflare-backend. Pass the program to test, e.g. the Nix
+# package's bin/terraform-cloudflare-backend; the default is the script in this
+# repo.
 set -euo pipefail
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-program="${1:-$root/terraform-cloudflare-sts}"
+program="${1:-$root/terraform-cloudflare-backend}"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-# A cloudflare-sts that records its arguments, then runs the command after --
-# with the R2 credentials a bucket profile gets.
-# Its shebang is this bash's: the Nix sandbox has no /usr/bin/env.
-mkdir "$tmp/fake"
-printf '#!%s\n' "$BASH" >"$tmp/fake/cloudflare-sts"
-cat >>"$tmp/fake/cloudflare-sts" <<'EOF'
-printf '%s\n' "$*" >"$FAKE_ARGS"
-while [[ "$1" != "--" ]]; do shift; done
-shift
-CLOUDFLARE_R2_ACCESS_KEY_ID=minted-id \
-  CLOUDFLARE_R2_SECRET_ACCESS_KEY=minted-secret \
-  CLOUDFLARE_R2_SESSION_TOKEN=minted-session \
-  exec "$@"
-EOF
-chmod +x "$tmp/fake/cloudflare-sts"
-
-# Without cloudflare-sts: only what the script itself needs.
+# Only what the script itself needs: no cloudflare-sts, which it never runs.
 mkdir "$tmp/bare"
 for tool in jq dirname cat; do
   ln -s "$(command -v "$tool")" "$tmp/bare/$tool"
 done
 
-export FAKE_ARGS="$tmp/args"
 failures=0
 
 # Runs the program with a clean environment plus the given variables, and
 # saves its stdout, stderr and exit code.
 run() {
   local status=0
-  env -i HOME="$tmp" FAKE_ARGS="$FAKE_ARGS" "$@" \
+  env -i HOME="$tmp" PATH="$tmp/bare" "$@" \
     "$BASH" "$program" "${ARGS[@]}" >"$tmp/stdout" 2>"$tmp/stderr" || status=$?
   echo "$status" >"$tmp/status"
 }
@@ -56,23 +39,24 @@ check() {
   fi
 }
 
-# The action's credentials: printed as they are, with the session token.
-ARGS=(--profile ignored)
-rm -f "$FAKE_ARGS"
-run PATH="$tmp/fake:$PATH" \
-  CLOUDFLARE_R2_ACCESS_KEY_ID=ci-id \
-  CLOUDFLARE_R2_SECRET_ACCESS_KEY=ci-secret \
-  CLOUDFLARE_R2_SESSION_TOKEN=ci-session
-check "env: exit code" 0 "$(cat "$tmp/status")"
-check "env: credentials" \
-  '{"Version":1,"AccessKeyId":"ci-id","SecretAccessKey":"ci-secret","SessionToken":"ci-session"}' \
+said() {
+  grep -q -- "$1" "$tmp/stderr" && echo yes || echo no
+}
+
+# The action's or `cloudflare-sts exec`'s credentials: printed as they are,
+# with the session token.
+ARGS=()
+run CLOUDFLARE_R2_ACCESS_KEY_ID=minted-id \
+  CLOUDFLARE_R2_SECRET_ACCESS_KEY=minted-secret \
+  CLOUDFLARE_R2_SESSION_TOKEN=minted-session
+check "minted: exit code" 0 "$(cat "$tmp/status")"
+check "minted: credentials" \
+  '{"Version":1,"AccessKeyId":"minted-id","SecretAccessKey":"minted-secret","SessionToken":"minted-session"}' \
   "$(jq -c . "$tmp/stdout")"
-check "env: cloudflare-sts not run" "no" "$([[ -e "$FAKE_ARGS" ]] && echo yes || echo no)"
 
 # Static keys, like an R2 API token's: no session token.
 ARGS=()
-run PATH="$tmp/bare" \
-  CLOUDFLARE_R2_ACCESS_KEY_ID=static-id \
+run CLOUDFLARE_R2_ACCESS_KEY_ID=static-id \
   CLOUDFLARE_R2_SECRET_ACCESS_KEY=static-secret
 check "static: credentials" \
   '{"Version":1,"AccessKeyId":"static-id","SecretAccessKey":"static-secret"}' \
@@ -80,41 +64,37 @@ check "static: credentials" \
 
 # A key ID without its secret is an error, not credentials.
 ARGS=()
-run PATH="$tmp/bare" CLOUDFLARE_R2_ACCESS_KEY_ID=half-id
+run CLOUDFLARE_R2_ACCESS_KEY_ID=half-id
 check "half: exit code" 5 "$(cat "$tmp/status")"
 check "half: no stdout" "" "$(cat "$tmp/stdout")"
-check "half: says what's missing" yes \
-  "$(grep -q 'CLOUDFLARE_R2_SECRET_ACCESS_KEY is not set' "$tmp/stderr" && echo yes || echo no)"
+check "half: says what's missing" yes "$(said 'CLOUDFLARE_R2_SECRET_ACCESS_KEY is not set')"
 
-# No credentials: cloudflare-sts exec gets them, with the options passed on.
-ARGS=(--profile example-org/app:tofu --ttl 30m)
-run PATH="$tmp/fake:$tmp/bare"
-check "exec: exit code" 0 "$(cat "$tmp/status")"
-check "exec: credentials" \
-  '{"Version":1,"AccessKeyId":"minted-id","SecretAccessKey":"minted-secret","SessionToken":"minted-session"}' \
-  "$(jq -c . "$tmp/stdout")"
-check "exec: arguments" \
-  "exec --quiet --profile example-org/app:tofu --ttl 30m -- jq -n -f" \
-  "$(sed 's| /[^ ]*/backend.jq$||' "$FAKE_ARGS")"
+# No credentials: says how to get them, and prints nothing.
+for case in unset empty; do
+  ARGS=()
+  if [[ "$case" == empty ]]; then
+    run CLOUDFLARE_R2_ACCESS_KEY_ID=
+  else
+    run
+  fi
+  check "$case: exit code" 1 "$(cat "$tmp/status")"
+  check "$case: no stdout" "" "$(cat "$tmp/stdout")"
+  check "$case: says to run under cloudflare-sts exec" yes "$(said "run tofu under 'cloudflare-sts exec --'")"
+done
 
-# An empty key ID counts as none.
-ARGS=()
-run PATH="$tmp/fake:$tmp/bare" CLOUDFLARE_R2_ACCESS_KEY_ID=
-check "empty: credentials from exec" minted-id "$(jq -r .AccessKeyId "$tmp/stdout")"
+# Options are refused, such as an older backend.ini's --profile, even with
+# credentials: they'd choose nothing.
+ARGS=(--profile example-org/app:tofu)
+run CLOUDFLARE_R2_ACCESS_KEY_ID=minted-id CLOUDFLARE_R2_SECRET_ACCESS_KEY=minted-secret
+check "option: exit code" 2 "$(cat "$tmp/status")"
+check "option: no stdout" "" "$(cat "$tmp/stdout")"
+check "option: says so" yes "$(said 'takes no options, got --profile')"
 
-# No credentials and no cloudflare-sts: says so.
-ARGS=()
-run PATH="$tmp/bare"
-check "missing cli: exit code" 1 "$(cat "$tmp/status")"
-check "missing cli: no stdout" "" "$(cat "$tmp/stdout")"
-check "missing cli: says so" yes \
-  "$(grep -q 'cloudflare-sts is not installed' "$tmp/stderr" && echo yes || echo no)"
-
-# --help needs neither credentials nor cloudflare-sts.
+# --help needs no credentials.
 ARGS=(--help)
-run PATH="$tmp/bare"
+run
 check "help: exit code" 0 "$(cat "$tmp/status")"
-check "help: usage" yes "$(grep -q '^Usage: terraform-cloudflare-sts' "$tmp/stdout" && echo yes || echo no)"
+check "help: usage" yes "$(grep -q '^Usage: terraform-cloudflare-backend' "$tmp/stdout" && echo yes || echo no)"
 
 if ((failures > 0)); then
   echo "$failures failed"
