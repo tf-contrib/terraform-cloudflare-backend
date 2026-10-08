@@ -33,7 +33,7 @@ Add the package to the repo's dev shell:
 
 ```nix
 {
-  inputs.terraform-cloudflare-backend.url = "github:tf-contrib/terraform-cloudflare-backend/v0.1.0"; # x-release-please-version
+  inputs.terraform-cloudflare-backend.url = "github:tf-contrib/terraform-cloudflare-backend/v0.2.0"; # x-release-please-version
 
   # ...
   devShells.default = pkgs.mkShell {
