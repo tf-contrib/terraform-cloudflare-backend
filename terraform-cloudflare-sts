@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# R2 credentials for Terraform's S3 backend, printed as JSON for an AWS shared
+# config profile's credential_process. See README.md.
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: terraform-cloudflare-sts [CLOUDFLARE-STS-EXEC-OPTIONS]
+
+Print R2 credentials for Terraform's S3 backend, in the AWS SDK's process
+credentials format. Meant for credential_process in backend.ini:
+
+  [profile tofu]
+  credential_process = terraform-cloudflare-sts --profile example-org/app:tofu
+
+With CLOUDFLARE_R2_ACCESS_KEY_ID set, by the cloudflare-sts action or by
+`cloudflare-sts exec`, it prints those credentials and ignores its options.
+Otherwise it runs `cloudflare-sts exec --quiet` with its options, such as
+--profile, --url and --ttl, to get them.
+EOF
+}
+
+case "${1:-}" in
+  -h | --help)
+    usage
+    exit 0
+    ;;
+esac
+
+# Beside this script, in the repo and in the Nix package alike.
+backend_jq="$(dirname -- "${BASH_SOURCE[0]}")/backend.jq"
+
+# In CI, or already under `cloudflare-sts exec -- tofu ...`.
+if [[ -n "${CLOUDFLARE_R2_ACCESS_KEY_ID:-}" ]]; then
+  exec jq -n -f "$backend_jq"
+fi
+
+if ! command -v cloudflare-sts >/dev/null; then
+  echo "terraform-cloudflare-sts: CLOUDFLARE_R2_ACCESS_KEY_ID is not set, and cloudflare-sts is not installed to get it (nix profile install github:cf-contrib/cloudflare-sts)" >&2
+  exit 1
+fi
+
+# cloudflare-sts writes only to stderr, so stdout is jq's JSON alone. The R2
+# credentials outlive the command: only the API token, if the profile has one,
+# is revoked when jq exits.
+exec cloudflare-sts exec --quiet "$@" -- jq -n -f "$backend_jq"
