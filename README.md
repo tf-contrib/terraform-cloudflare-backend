@@ -18,13 +18,13 @@ them:
 
 - **In CI,** the [cloudflare-sts action](https://github.com/cf-contrib/cloudflare-sts),
   with short-lived credentials for the job.
-- **Locally,** `cloudflare-sts exec -- tofu ...`, with short-lived credentials
+- **Locally,** `cf-vault exec -p <profile> -- tofu ...`, with short-lived credentials
   from your login.
 - **Or** an R2 API token's keys, exported, when there's no broker to ask.
 
 Without them it fails at once, saying so: it never fetches credentials itself.
 `AWS_*` is neither read nor set. The Cloudflare provider needs nothing from it:
-it reads `CLOUDFLARE_API_TOKEN`, which the action and `cloudflare-sts exec` set
+it reads `CLOUDFLARE_API_TOKEN`, which the action and `cf-vault exec` set
 too, so the same command gets both.
 
 ## Usage
@@ -113,21 +113,32 @@ steps:
 ```
 
 Locally, every `tofu` command that reads or writes state runs under
-`cloudflare-sts exec`, which gives the backend and the provider their
+`cf-vault exec`, which gives the backend and the provider their
 credentials alike, and revokes the token when `tofu` exits:
 
 ```sh
-cloudflare-sts login --url https://cloudflare-sts-api.example.com   # once
-cloudflare-sts exec --profile example-org/app:tofu -- tofu init
-cloudflare-sts exec --profile example-org/app:tofu -- tofu plan
+cf-vault login -p tofu                  # once
+cf-vault exec -p tofu -- tofu init
+cf-vault exec -p tofu -- tofu plan
 ```
 
-`CLOUDFLARE_STS_CLI_URL` and `CLOUDFLARE_STS_CLI_PROFILE`, e.g. set in the dev
-shell, save the options.
+where the `tofu` profile in `~/.config/cf-vault/config.toml` points at the broker:
+
+```toml
+[tofu]
+type = "oauth2"
+account_id = "<account id>"
+
+[tofu.oauth2.exchange]
+url = "https://cloudflare-sts-api.example.com"
+profile = "example-org/app:tofu"
+```
+
+`CF_VAULT_PROFILE`, e.g. set in the dev shell, saves the `-p`.
 
 ## Limits
 
-- **No expiry.** `cloudflare-sts exec` doesn't pass the credentials' expiry on,
+- **No expiry.** `cf-vault exec` doesn't pass the credentials' expiry on,
   so OpenTofu uses them for the whole run. An apply that outlasts the profile's
   `ttl` fails to write its state at the end. OpenTofu then saves it to
   `errored.tfstate`. Give the profile a `ttl` longer than your longest apply.

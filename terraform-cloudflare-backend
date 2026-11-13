@@ -10,7 +10,7 @@ Usage: terraform-cloudflare-backend
 Print R2 credentials for Terraform's S3 backend, in the AWS SDK's process
 credentials format, from CLOUDFLARE_R2_ACCESS_KEY_ID,
 CLOUDFLARE_R2_SECRET_ACCESS_KEY and CLOUDFLARE_R2_SESSION_TOKEN: as the
-cloudflare-sts action and `cloudflare-sts exec` set them, or an R2 API token's
+cloudflare-sts action and `cf-vault exec` set them, or an R2 API token's
 keys. Meant for credential_process in backend.ini:
 
   [profile tofu]
@@ -32,7 +32,7 @@ case "${1:-}" in
 esac
 
 if [[ -z "${CLOUDFLARE_R2_ACCESS_KEY_ID:-}" ]]; then
-  echo "terraform-cloudflare-backend: CLOUDFLARE_R2_ACCESS_KEY_ID is not set: run tofu under 'cloudflare-sts exec --', or export an R2 API token's keys" >&2
+  echo "terraform-cloudflare-backend: CLOUDFLARE_R2_ACCESS_KEY_ID is not set: run tofu under 'cf-vault exec -p <profile> --', or export an R2 API token's keys" >&2
   exit 1
 fi
 

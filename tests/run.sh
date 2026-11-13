@@ -43,7 +43,7 @@ said() {
   grep -q -- "$1" "$tmp/stderr" && echo yes || echo no
 }
 
-# The action's or `cloudflare-sts exec`'s credentials: printed as they are,
+# The action's or `cf-vault exec`'s credentials: printed as they are,
 # with the session token.
 ARGS=()
 run CLOUDFLARE_R2_ACCESS_KEY_ID=minted-id \
@@ -79,7 +79,7 @@ for case in unset empty; do
   fi
   check "$case: exit code" 1 "$(cat "$tmp/status")"
   check "$case: no stdout" "" "$(cat "$tmp/stdout")"
-  check "$case: says to run under cloudflare-sts exec" yes "$(said "run tofu under 'cloudflare-sts exec --'")"
+  check "$case: says to run under cf-vault exec" yes "$(said "run tofu under 'cf-vault exec -p <profile> --'")"
 done
 
 # Options are refused, such as an older backend.ini's --profile, even with

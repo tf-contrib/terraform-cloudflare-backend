@@ -23,7 +23,7 @@
       in
       {
         # jq is its only dependency: the credentials come from the
-        # environment, which the cloudflare-sts action, `cloudflare-sts exec`,
+        # environment, which the cloudflare-sts action, `cf-vault exec`,
         # or an exported R2 API token sets.
         packages.default = pkgs.stdenvNoCC.mkDerivation {
           pname = name;

@@ -1,5 +1,5 @@
 # R2 credentials from CLOUDFLARE_R2_*, as the cloudflare-sts action and
-# `cloudflare-sts exec` set them, or an R2 API token's keys, in the AWS SDK's
+# `cf-vault exec` set them, or an R2 API token's keys, in the AWS SDK's
 # process credentials format.
 
 # The environment variable $name's value, or an error if it's unset or empty.
